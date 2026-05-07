@@ -312,7 +312,7 @@ body.dark .tag.on{color:#FFFFFF}
 .ing-locked-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:rgba(45,106,63,0.57);color:var(--good);border:1px solid rgba(45,106,63,0.65)}
 
 .ac-wrap{position:relative}
-.ac-drop{position:absolute;top:100%;left:0;right:0;z-index:99;background:var(--bg-card);border:1.5px solid var(--border);border-radius:10px;max-height:200px;overflow-y:auto;display:none;box-shadow:0 8px 24px rgba(0,0,0,.15);margin-top:4px}
+.ac-drop{position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--bg-card);border:1.5px solid var(--border);border-radius:10px;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;box-shadow:0 8px 24px rgba(0,0,0,.15);margin-top:4px}
 .ac-drop.open{display:block}
 .ac-item{padding:10px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--sec-border);color:var(--text)}
 .ac-item:last-child{border-bottom:none}
@@ -1306,8 +1306,28 @@ function init(){
 
   updateCurrencyBtns();
   updateLastBackupInfo();
-  // Show backup reminder after a short delay so it doesn't interrupt load
   setTimeout(checkAutoBackupReminder, 3000);
+  // Reposition any open dropdowns when on-screen keyboard resizes viewport
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize',()=>{
+      document.querySelectorAll('.ac-drop.open').forEach(drop=>{
+        const i=drop.id.replace('ac-','');
+        const inputEl=document.getElementById('ing-name-'+i);
+        if(!inputEl) return;
+        const rect=inputEl.getBoundingClientRect();
+        const visH=window.visualViewport.height;
+        const spaceBelow=visH-rect.bottom-8;
+        const spaceAbove=rect.top-8;
+        if(spaceBelow<120&&spaceAbove>spaceBelow){
+          drop.style.top='auto';drop.style.bottom='calc(100% + 4px)';
+          drop.style.maxHeight=Math.max(Math.min(spaceAbove,280),120)+'px';
+        } else {
+          drop.style.top='100%';drop.style.bottom='auto';
+          drop.style.maxHeight=Math.max(Math.min(spaceBelow,280),120)+'px';
+        }
+      });
+    });
+  }
 }
 // Safe history wrapper — fails silently in srcdoc/preview iframes
 function _pushState(state,url){try{history.pushState(state,'',url);}catch(e){}}
@@ -1613,9 +1633,25 @@ function onNameInput(i,val){
   onNameInput._t=setTimeout(()=>{
     const drop=document.getElementById('ac-'+i);
     if(!drop) return;
-    const s=val.toLowerCase();
+    const s=val.toLowerCase().trim();
+
+    // Smarter ranking: exact > starts-with-word > starts-with > contains-word-boundary > contains
+    const allIng=masterData.filter(m=>m.name.toLowerCase().includes(s));
+    allIng.sort((a,b)=>{
+      const an=a.name.toLowerCase(), bn=b.name.toLowerCase();
+      const rank=n=>{
+        if(n===s) return 0;                          // exact match
+        if(n.startsWith(s+' ')||n===s) return 1;    // "Water ..." starts with word
+        if(n.startsWith(s)) return 2;                // starts with chars
+        const words=n.split(/\s+/);
+        if(words.some(w=>w.startsWith(s))) return 3; // any word starts with
+        return 4;                                     // just contains
+      };
+      return rank(an)-rank(bn)||an.localeCompare(bn);
+    });
+
     let items=[];
-    masterData.filter(m=>m.name.toLowerCase().includes(s)&&items.length<6).forEach(m=>{
+    allIng.slice(0,8).forEach(m=>{
       items.push(`<div class="ac-item" data-type="ing" data-row="${i}" data-name="${escH(m.name)}" data-cost="${m.cost||0}" data-unit="${escH(m.unit||'g')}" data-gpercup="${m.gPerCup||''}">
         <div class="ac-name">${escH(m.name)}${m.brand?` <span style='color:var(--text-muted);font-weight:400'>(${escH(m.brand)})</span>`:''}</div>
         <div class="ac-meta">${currFmt(m.cost)}/${m.unit}${m.gPerCup?` · <span style='color:var(--accent)'>${m.gPerCup}g/cup</span>`:''}${m.supplier?' · '+escH(m.supplier):''}</div>
@@ -1627,13 +1663,58 @@ function onNameInput(i,val){
         <div class="ac-meta">${escH(r.category||'')} · ${currFmt(r.perPort||0)}/portion</div>
       </div>`);
     });
+
     if(!items.length){drop.classList.remove('open');}
     else{
       drop.innerHTML=items.join('');
       drop.classList.add('open');
-      
+
+      // Use visualViewport if available (accounts for on-screen keyboard correctly)
+      const inputEl=document.getElementById('ing-name-'+i);
+      if(inputEl){
+        const rect=inputEl.getBoundingClientRect();
+        // visualViewport gives the actual visible area excluding keyboard
+        const visH=(window.visualViewport?window.visualViewport.height:window.innerHeight);
+        const spaceBelow=visH-rect.bottom-8;
+        const spaceAbove=rect.top-8;
+        const maxItems=Math.min(items.length,8);
+        const itemH=56; // approx height per item
+        const desiredH=maxItems*itemH;
+
+        if(spaceBelow<120&&spaceAbove>spaceBelow){
+          // Show ABOVE input — keyboard is covering the space below
+          drop.style.top='auto';
+          drop.style.bottom='calc(100% + 4px)';
+          drop.style.marginTop='0';
+          drop.style.marginBottom='4px';
+          drop.style.maxHeight=Math.max(Math.min(spaceAbove,desiredH),120)+'px';
+          drop.style.boxShadow='0 -8px 24px rgba(0,0,0,.22)';
+        } else {
+          // Show below input
+          drop.style.top='100%';
+          drop.style.bottom='auto';
+          drop.style.marginTop='4px';
+          drop.style.marginBottom='0';
+          drop.style.maxHeight=Math.max(Math.min(spaceBelow,desiredH),120)+'px';
+          drop.style.boxShadow='0 8px 24px rgba(0,0,0,.15)';
+        }
+        // Always allow internal scrolling
+        drop.style.overflowY='auto';
+        drop.style.webkitOverflowScrolling='touch';
+      }
+
       drop.querySelectorAll('.ac-item').forEach(el=>{
         el.addEventListener('mousedown',e=>{
+          e.preventDefault();
+          const row=parseInt(el.dataset.row);
+          const type=el.dataset.type;
+          if(type==='sub'){
+            selectSubRec(row, el.dataset.name, parseFloat(el.dataset.cost)||0, el.dataset.id);
+          } else {
+            selectIng(row, el.dataset.name, parseFloat(el.dataset.cost)||0, el.dataset.unit||'g', parseFloat(el.dataset.gpercup)||null);
+          }
+        });
+        el.addEventListener('touchend',e=>{
           e.preventDefault();
           const row=parseInt(el.dataset.row);
           const type=el.dataset.type;
@@ -1646,7 +1727,7 @@ function onNameInput(i,val){
       });
     }
   },masterData.length>300?120:40);
-  
+
   clearTimeout(onNameInput._nt);
   onNameInput._nt=setTimeout(()=>autoFillNutr(i,val),600);
 }
