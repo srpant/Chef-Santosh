@@ -722,13 +722,21 @@ body.dark .tag.on{color:#C77DFF}
       <div class="g2">
         <div class="fld"><label>Target food cost (%)</label><input type="number" id="targetFC" value="30" min="1" max="100" step="0.5" oninput="recalc()"/></div>
         <div class="fld">
-          <label>Sell price (<span class="currency-label">KD</span>)</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="number" id="m-sell-input" step="0.001" readonly style="background:var(--bg)"/>
-            <button onclick="toggleSellLock()" id="sellLockBtn" class="btn btn-ghost btn-sm" style="white-space:nowrap;padding:8px 10px">✏️</button>
-          </div>
-          <span id="sellModeLabel" style="font-size:10px;color:var(--text-muted);margin-top:3px">auto-calculated</span>
+          <label>Suggested sell price (<span class="currency-label">KD</span>)</label>
+          <input type="number" id="m-sell-auto" step="0.001" readonly style="background:var(--bg);opacity:0.75" title="Auto-calculated from target FC%"/>
         </div>
+      </div>
+      <!-- Actual Sell Price row - full width -->
+      <div class="fld" style="margin-top:2px">
+        <label style="display:flex;align-items:center;gap:6px">
+          <span style="color:var(--accent);font-weight:800">★</span> Your actual sell price (<span class="currency-label">KD</span>)
+          <span id="sellModeLabel" style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px;background:var(--met-bg);color:var(--text-muted);margin-left:4px">= suggested</span>
+        </label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="m-sell-input" step="0.001" placeholder="Enter your actual sell price..." oninput="onActualSellInput()" style="border:1.5px solid var(--accent);background:var(--bg-card);font-weight:700"/>
+          <button onclick="resetActualSell()" id="sellResetBtn" class="btn btn-ghost btn-sm" style="white-space:nowrap;padding:8px 10px;display:none" title="Reset to suggested price">↺ Reset</button>
+        </div>
+        <span style="font-size:10px;color:var(--text-muted);margin-top:2px;display:block">FC% and GP% update live as you type</span>
       </div>
       <div class="metrics" id="metricsGrid">
         <div class="met"><div class="met-lbl">Raw Cost</div><div class="met-val" id="m-raw">0.000</div></div>
@@ -1750,8 +1758,14 @@ function recalc(){
   const gp=sell>0?((sell-perPort)/sell)*100:0;
   setEl('m-raw',currFmt(ingTotal));
   setEl('m-port',currFmt(perPort));
-  const si=document.getElementById('m-sell-input');
-  if(si&&si.readOnly) si.value=sell.toFixed(currDec());
+  const si=document.getElementById('m-sell-auto');
+  if(si) si.value=autoSell.toFixed(currDec());
+  // Actual sell field: if no override typed, mirror the suggested price
+  const actualInput=document.getElementById('m-sell-input');
+  if(actualInput&&!actualInput.dataset.userSet){
+    actualInput.value=autoSell.toFixed(currDec());
+    sellPriceOverride=null;
+  }
   const fcEl=document.getElementById('m-fc');
   const dfc=sellPriceOverride!==null?actualFC:tfc;
   if(fcEl){fcEl.textContent=dfc.toFixed(1)+'%';fcEl.className='met-val '+(dfc<=28?'good':dfc<=35?'warn':'bad');}
@@ -1770,21 +1784,58 @@ function recalc(){
 
 function setEl(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
 
-function toggleSellLock(){
+function onActualSellInput(){
   const input=document.getElementById('m-sell-input');
   const label=document.getElementById('sellModeLabel');
-  const btn=document.getElementById('sellLockBtn');
-  if(input.readOnly){
-    input.readOnly=false;input.style.border='1.5px solid var(--accent)';input.style.background='var(--bg-card)';
-    input.oninput=()=>{sellPriceOverride=parseFloat(input.value)||0;recalc();};
-    label.textContent='manual override';btn.textContent='🔒 reset';
-    sellPriceOverride=parseFloat(input.value)||0;recalc();
-    input.focus();
+  const resetBtn=document.getElementById('sellResetBtn');
+  const autoInput=document.getElementById('m-sell-auto');
+  const autoVal=parseFloat(autoInput?.value)||0;
+  const val=parseFloat(input.value);
+  if(!isNaN(val)&&val>0){
+    input.dataset.userSet='1';
+    sellPriceOverride=val;
+    // Show if it differs from suggested
+    const diff=Math.abs(val-autoVal);
+    if(diff>0.001){
+      label.textContent='custom price';
+      label.style.background='rgba(234,179,8,0.15)';
+      label.style.color='var(--warn)';
+      if(resetBtn) resetBtn.style.display='';
+    } else {
+      label.textContent='= suggested';
+      label.style.background='';
+      label.style.color='';
+      if(resetBtn) resetBtn.style.display='none';
+    }
   } else {
-    input.readOnly=true;input.style.border='1.5px solid var(--border2)';input.style.background='var(--bg)';
-    input.oninput=null;label.textContent='auto-calculated';btn.textContent='✏️';
-    sellPriceOverride=null;recalc();
+    input.dataset.userSet='';
+    sellPriceOverride=null;
+    label.textContent='= suggested';
+    label.style.background='';
+    label.style.color='';
+    if(resetBtn) resetBtn.style.display='none';
   }
+  recalc();
+}
+
+function resetActualSell(){
+  const input=document.getElementById('m-sell-input');
+  const label=document.getElementById('sellModeLabel');
+  const resetBtn=document.getElementById('sellResetBtn');
+  const autoInput=document.getElementById('m-sell-auto');
+  input.value=autoInput?.value||'';
+  input.dataset.userSet='';
+  sellPriceOverride=null;
+  label.textContent='= suggested';
+  label.style.background='';
+  label.style.color='';
+  if(resetBtn) resetBtn.style.display='none';
+  recalc();
+}
+
+function toggleSellLock(){
+  // Legacy — redirect to new system
+  onActualSellInput();
 }
 
 function onTempC(v){const n=parseFloat(v);if(!isNaN(n)){const el=document.getElementById('cookTempF');if(el)el.value=Math.round(n*9/5+32);}scheduleAutosave();}
@@ -1971,9 +2022,14 @@ function getFormData(){
   const tfc=parseFloat(document.getElementById('targetFC')?.value)||30;
   const total=ingTotal+labour+overhead;
   const perPort=total/yld;
-  const sell=tfc>0?perPort/(tfc/100):0;
+  const autoSell=tfc>0?perPort/(tfc/100):0;
+  // Use manual override if set, otherwise auto-calculated
+  const sell=sellPriceOverride!==null?sellPriceOverride:autoSell;
+  const actualFC=sell>0?(perPort/sell)*100:tfc;
   const gp=sell>0?((sell-perPort)/sell)*100:0;
   const tags=[...document.querySelectorAll('.tag.on')].map(t=>t.textContent);
+  // When sell price is manually overridden, store the real FC% that results
+  const savedTfc=sellPriceOverride!==null?actualFC:tfc;
   return{
     id:editingId||Date.now(),
     name:document.getElementById('recipeName').value.trim(),
@@ -1985,7 +2041,7 @@ function getFormData(){
     cookTempF:document.getElementById('cookTempF').value||'',
     menuSeason:document.getElementById('menuSeason').value||'',
     platingStyle:document.getElementById('platingStyle').value||'',
-    tags,labour,overhead,tfc,ingTotal,total,perPort,sell,gp,
+    tags,labour,overhead,tfc:savedTfc,ingTotal,total,perPort,sell,gp,
     ingredients:rows.map(r=>({...r})),
     nutrData:nutrData.map(n=>({...n})),
     allergenState:{...allergenState},
@@ -2011,6 +2067,22 @@ function populateForm(d){
   nutrData=(d.nutrData&&d.nutrData.length)?d.nutrData.map(n=>({...n})):rows.map(()=>({cal:0,pro:0,carb:0,fat:0,fib:0,source:'manual'}));
   allergenState={...(d.allergenState||{})};
   sellPriceOverride=d.sellPriceOverride||null;
+  // Restore actual sell price field state
+  const sellInput=document.getElementById('m-sell-input');
+  const sellLabel=document.getElementById('sellModeLabel');
+  const sellReset=document.getElementById('sellResetBtn');
+  if(sellInput){
+    if(sellPriceOverride!==null){
+      sellInput.value=sellPriceOverride.toFixed(3);
+      sellInput.dataset.userSet='1';
+      if(sellLabel){sellLabel.textContent='custom price';sellLabel.style.background='rgba(234,179,8,0.15)';sellLabel.style.color='var(--warn)';}
+      if(sellReset) sellReset.style.display='';
+    } else {
+      sellInput.dataset.userSet='';
+      if(sellLabel){sellLabel.textContent='= suggested';sellLabel.style.background='';sellLabel.style.color='';}
+      if(sellReset) sellReset.style.display='none';
+    }
+  }
   document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
   (d.tags||[]).forEach(tag=>{document.querySelectorAll('.tag').forEach(t=>{if(t.textContent===tag)t.classList.add('on');});});
   renderRows();renderAllergens();recalc();
@@ -2018,6 +2090,9 @@ function populateForm(d){
 
 function clearForm(){
   editingId=null;currentPhotoDataUrl=null;sellPriceOverride=null;
+  const si2=document.getElementById('m-sell-input');if(si2){si2.value='';si2.dataset.userSet='';}
+  const sl=document.getElementById('sellModeLabel');if(sl){sl.textContent='= suggested';sl.style.background='';sl.style.color='';}
+  const sr=document.getElementById('sellResetBtn');if(sr)sr.style.display='none';
   clearDishPhoto();
   ['recipeName','portionSize','prepTime','cookTime','labour','overhead','method','chefNotes','cookTempC','cookTempF','platingStyle'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   const yEl=document.getElementById('yield');if(yEl)yEl.value=4;
@@ -2708,6 +2783,7 @@ function printRecipe(){
   const fmt=function(v){return cur.sym+(+v||0).toFixed(cur.dec);};
   const ings=r.ingredients||[];
   const yld=parseInt(r.yield)||1;
+
   // Build nutrition block
   let nutrHtml='';
   const nutrArr=r.nutrData||[];
@@ -2721,77 +2797,136 @@ function printRecipe(){
       Object.keys(totals).forEach(function(k){totals[k]+=(nd[k]||0)*grams/100;});
     });
     if(Object.values(totals).some(function(v){return v>0;})){
-      nutrHtml='<h2>Nutrition (per portion)</h2>';
-      nutrHtml+='<table style="text-align:center"><thead><tr><th>Kcal</th><th>Protein</th><th>Carbs</th><th>Fat</th><th>Fibre</th></tr></thead><tbody><tr>';
-      nutrHtml+='<td style="font-size:18px;font-weight:900">'+Math.round(totals.cal/yld)+'</td>';
-      nutrHtml+='<td style="font-size:18px;font-weight:900">'+Math.round(totals.pro/yld)+'g</td>';
-      nutrHtml+='<td style="font-size:18px;font-weight:900">'+Math.round(totals.carb/yld)+'g</td>';
-      nutrHtml+='<td style="font-size:18px;font-weight:900">'+Math.round(totals.fat/yld)+'g</td>';
-      nutrHtml+='<td style="font-size:18px;font-weight:900">'+Math.round(totals.fib/yld)+'g</td>';
-      nutrHtml+='</tr></tbody></table>';
+      nutrHtml='<div class="pr-section">Nutrition per portion</div>';
+      nutrHtml+='<div class="pr-nutr-grid">';
+      nutrHtml+='<div class="pr-nutr-box"><div class="pr-nutr-lbl">Kcal</div><div class="pr-nutr-val">'+Math.round(totals.cal/yld)+'</div></div>';
+      nutrHtml+='<div class="pr-nutr-box"><div class="pr-nutr-lbl">Protein</div><div class="pr-nutr-val">'+Math.round(totals.pro/yld)+'g</div></div>';
+      nutrHtml+='<div class="pr-nutr-box"><div class="pr-nutr-lbl">Carbs</div><div class="pr-nutr-val">'+Math.round(totals.carb/yld)+'g</div></div>';
+      nutrHtml+='<div class="pr-nutr-box"><div class="pr-nutr-lbl">Fat</div><div class="pr-nutr-val">'+Math.round(totals.fat/yld)+'g</div></div>';
+      nutrHtml+='<div class="pr-nutr-box"><div class="pr-nutr-lbl">Fibre</div><div class="pr-nutr-val">'+Math.round(totals.fib/yld)+'g</div></div>';
+      nutrHtml+='</div>';
     }
   }
-  // Build allergens block
+
+  // Build allergens
   const allergens=Object.entries(r.allergenState||{}).filter(function(e){return e[1]!=='none';});
   let allergenHtml='';
   if(allergens.length){
-    allergenHtml='<h2>Allergens</h2><p style="font-size:13px;line-height:2">';
+    allergenHtml='<div class="pr-section">Allergens</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
     allergens.forEach(function(e){
       const bg=e[1]==='present'?'#fee2e2':'#dcfce7';
-      allergenHtml+='<span style="display:inline-block;padding:2px 10px;margin:2px;border-radius:4px;background:'+bg+';font-weight:700">'+e[0]+': '+e[1]+'</span> ';
+      const col=e[1]==='present'?'#b91c1c':'#166534';
+      allergenHtml+='<span style="background:'+bg+';color:'+col+';padding:3px 10px;border-radius:4px;font-size:12px;font-weight:700">'+escH(e[0])+': '+e[1]+'</span>';
     });
-    allergenHtml+='</p>';
+    allergenHtml+='</div>';
   }
+
   // Build ingredients rows
   let ingRows='';
   ings.filter(function(i){return i.name;}).forEach(function(i){
-    ingRows+='<tr><td>'+escH(i.name)+'</td><td>'+i.qty+'</td><td>'+i.unit+'</td>';
-    ingRows+='<td>'+(i.waste?i.waste+'%':'-')+'</td>';
-    ingRows+='<td>'+fmt(rowCost(i))+'</td></tr>';
+    ingRows+='<tr><td>'+escH(i.name)+'</td><td style="text-align:right">'+i.qty+' '+i.unit+'</td>';
+    ingRows+='<td style="text-align:right">'+(i.waste?i.waste+'%':'-')+'</td>';
+    ingRows+='<td style="text-align:right;font-weight:700">'+fmt(rowCost(i))+'</td></tr>';
   });
-  // Build method/notes
+
+  // Method / notes
   let methodHtml='';
   if(r.method){
-    methodHtml='<h2>Method</h2><div class="method">'+String(r.method).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+    methodHtml='<div class="pr-section">Method</div><div class="pr-method">'+String(r.method).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
   }
   let notesHtml='';
   if(r.chefNotes){
-    notesHtml='<h2>Chef\'s Notes</h2><div class="method">'+String(r.chefNotes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+    notesHtml='<div class="pr-section">Chef\'s Notes</div><div class="pr-method">'+String(r.chefNotes).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
   }
-  let photoHtml='';
-  if(r.photo){
-    photoHtml='<img src="'+r.photo+'" style="width:100%;max-height:220px;object-fit:cover;border-radius:8px;margin-bottom:18px" alt="dish"/>';
-  }
-  // Meta badges
-  let metaHtml='<span>Yield: <strong>'+yld+' portions</strong></span>';
-  if(r.category) metaHtml='<span class="badge">'+escH(r.category)+'</span> '+metaHtml;
-  if(r.isSubRecipe) metaHtml+=' <span class="badge" style="background:#fef3c7">Sub Recipe</span>';
-  if(r.portionSize) metaHtml+=' <span>Portion: <strong>'+escH(r.portionSize)+'</strong></span>';
-  if(r.prepTime) metaHtml+=' <span>Prep: <strong>'+r.prepTime+' min</strong></span>';
-  if(r.cookTime) metaHtml+=' <span>Cook: <strong>'+r.cookTime+' min</strong></span>';
-  if(r.cookTempC) metaHtml+=' <span>Temp: <strong>'+r.cookTempC+'\u00b0C</strong></span>';
-  // Assemble final HTML
-  const css='*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;max-width:700px;margin:0 auto;padding:28px;color:#1a1a1a;font-size:14px}h1{font-size:26px;font-weight:900;margin-bottom:6px}h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:#666;margin:18px 0 8px;border-bottom:1.5px solid #ddd;padding-bottom:5px}.meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#555;margin-bottom:18px}.badge{background:#f0f0f0;padding:3px 9px;border-radius:4px;font-weight:700}table{width:100%;border-collapse:collapse;margin-bottom:4px}td,th{padding:8px 10px;border-bottom:1px solid #eee;text-align:left}th{font-weight:700;font-size:11px;text-transform:uppercase;color:#888;background:#fafafa}.cost-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:14px}.cost-row.total{font-weight:900;font-size:17px;color:#059669;border-bottom:2px solid #059669}.method{white-space:pre-wrap;line-height:1.75;font-size:13px;margin-top:4px}.footer{margin-top:28px;font-size:11px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px}@media print{@page{margin:15mm}body{padding:0}}';
-  let html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+escH(r.name)+'</title><style>'+css+'</style></head><body>';
-  html+=photoHtml;
-  html+='<h1>'+escH(r.name)+'</h1>';
-  html+='<div class="meta">'+metaHtml+'</div>';
-  html+='<h2>Ingredients</h2><table><thead><tr><th>Ingredient</th><th>Qty</th><th>Unit</th><th>Waste</th><th>Cost</th></tr></thead><tbody>'+ingRows+'</tbody></table>';
-  html+='<h2>Costing</h2>';
-  html+='<div class="cost-row"><span>Ingredients total</span><span>'+fmt(r.ingTotal)+'</span></div>';
-  html+='<div class="cost-row"><span>Labour</span><span>'+fmt(r.labour)+'</span></div>';
-  html+='<div class="cost-row"><span>Overhead</span><span>'+fmt(r.overhead)+'</span></div>';
-  html+='<div class="cost-row total"><span>Total cost</span><span>'+fmt(r.total)+'</span></div>';
-  html+='<div class="cost-row"><span>Cost per portion</span><span>'+fmt(r.perPort)+'</span></div>';
-  html+='<div class="cost-row"><span>Sell price</span><span>'+fmt(r.sell)+'</span></div>';
-  html+='<div class="cost-row"><span>Food cost %</span><span>'+(r.tfc||0).toFixed(1)+'%</span></div>';
-  html+='<div class="cost-row"><span>Gross profit %</span><span>'+(r.gp||0).toFixed(1)+'%</span></div>';
-  html+=nutrHtml+methodHtml+notesHtml+allergenHtml;
-  html+='<div class="footer">Chef Santosh | '+escH(r.name)+' | Saved: '+(r.savedAt||'')+'</div>';
-  html+='</body></html>';
-  const w=window.open('','_blank','width=780,height=950');
-  if(w){w.document.write(html);w.document.close();setTimeout(function(){w.print();},500);}
-  else showToast('Allow pop-ups to print');
+
+  // Meta line
+  let metaParts=[];
+  metaParts.push('Yield: <strong>'+yld+' portions</strong>');
+  if(r.portionSize) metaParts.push('Portion: <strong>'+escH(r.portionSize)+'</strong>');
+  if(r.prepTime) metaParts.push('Prep: <strong>'+r.prepTime+' min</strong>');
+  if(r.cookTime) metaParts.push('Cook: <strong>'+r.cookTime+' min</strong>');
+  if(r.cookTempC) metaParts.push('Temp: <strong>'+r.cookTempC+'\u00b0C</strong>');
+
+  // Build full content
+  var content='';
+  if(r.photo) content+='<img src="'+r.photo+'" class="pr-photo" alt="dish"/>';
+  content+='<div class="pr-header">';
+  content+='<div class="pr-title">'+escH(r.name)+'</div>';
+  if(r.category) content+='<span class="pr-badge">'+escH(r.category)+'</span>';
+  if(r.isSubRecipe) content+='<span class="pr-badge" style="background:#fef3c7;color:#92400e">Sub Recipe</span>';
+  content+='</div>';
+  content+='<div class="pr-meta">'+metaParts.join(' &nbsp;·&nbsp; ')+'</div>';
+
+  content+='<div class="pr-section">Ingredients</div>';
+  content+='<table class="pr-table"><thead><tr><th>Ingredient</th><th style="text-align:right">Qty & Unit</th><th style="text-align:right">Waste</th><th style="text-align:right">Cost</th></tr></thead>';
+  content+='<tbody>'+ingRows+'</tbody></table>';
+
+  content+='<div class="pr-section">Costing</div>';
+  content+='<div class="pr-cost-row"><span>Ingredients total</span><span>'+fmt(r.ingTotal)+'</span></div>';
+  content+='<div class="pr-cost-row"><span>Labour</span><span>'+fmt(r.labour)+'</span></div>';
+  content+='<div class="pr-cost-row"><span>Overhead</span><span>'+fmt(r.overhead)+'</span></div>';
+  content+='<div class="pr-cost-row pr-cost-total"><span>Total cost</span><span>'+fmt(r.total)+'</span></div>';
+  content+='<div class="pr-cost-row"><span>Cost per portion</span><span>'+fmt(r.perPort)+'</span></div>';
+  content+='<div class="pr-cost-row"><span>Sell price</span><span>'+fmt(r.sell)+'</span></div>';
+  content+='<div class="pr-cost-row"><span>Food cost %</span><span>'+(r.tfc||0).toFixed(1)+'%</span></div>';
+  content+='<div class="pr-cost-row pr-gp"><span>Gross profit %</span><span>'+(r.gp||0).toFixed(1)+'%</span></div>';
+
+  content+=nutrHtml+methodHtml+notesHtml+allergenHtml;
+  content+='<div class="pr-footer">Chef Santosh &nbsp;&mdash;&nbsp; '+escH(r.name)+' &nbsp;&mdash;&nbsp; Saved: '+(r.savedAt||'')+'</div>';
+
+  // Inject overlay into page
+  var old=document.getElementById('printOverlay');
+  if(old) old.remove();
+
+  var overlay=document.createElement('div');
+  overlay.id='printOverlay';
+  overlay.innerHTML=
+    '<style id="printOverlayStyle">'+
+    '#printOverlay{position:fixed;inset:0;z-index:99999;background:#fff;overflow-y:auto;font-family:Georgia,serif;color:#1a1a1a;font-size:14px;}'+
+    '#printOverlayBar{position:sticky;top:0;background:#fff;border-bottom:1px solid #e5e7eb;padding:12px 16px;display:flex;gap:10px;align-items:center;justify-content:space-between;z-index:2;box-shadow:0 2px 8px rgba(0,0,0,.08);}'+
+    '#printOverlayBar button{padding:10px 18px;border-radius:8px;border:none;font-weight:700;font-size:14px;cursor:pointer;}'+
+    '#printOverlayBar .btn-print{background:#059669;color:#fff;}'+
+    '#printOverlayBar .btn-close{background:#f3f4f6;color:#374151;}'+
+    '#printOverlayBar .pr-hint{font-size:12px;color:#6b7280;flex:1;text-align:center;line-height:1.4;}'+
+    '#printContent{max-width:700px;margin:0 auto;padding:24px 20px 40px;}'+
+    '.pr-photo{width:100%;max-height:220px;object-fit:cover;border-radius:8px;margin-bottom:16px;}'+
+    '.pr-header{margin-bottom:6px;}'+
+    '.pr-title{font-size:24px;font-weight:900;margin-bottom:6px;}'+
+    '.pr-badge{display:inline-block;background:#f0f0f0;padding:2px 9px;border-radius:4px;font-size:12px;font-weight:700;margin-right:6px;margin-bottom:6px;}'+
+    '.pr-meta{font-size:12px;color:#555;margin-bottom:16px;line-height:1.8;}'+
+    '.pr-section{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#888;font-weight:700;border-bottom:1.5px solid #e5e7eb;padding-bottom:4px;margin:18px 0 10px;}'+
+    '.pr-table{width:100%;border-collapse:collapse;margin-bottom:6px;}'+
+    '.pr-table td,.pr-table th{padding:7px 8px;border-bottom:1px solid #f3f4f6;font-size:13px;}'+
+    '.pr-table th{font-size:11px;font-weight:700;text-transform:uppercase;color:#9ca3af;background:#fafafa;}'+
+    '.pr-cost-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;}'+
+    '.pr-cost-total{font-weight:900;font-size:16px;color:#059669;border-bottom:2px solid #059669;margin-bottom:4px;}'+
+    '.pr-gp{font-weight:700;color:#059669;}'+
+    '.pr-nutr-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px;}'+
+    '.pr-nutr-box{border:1px solid #e5e7eb;border-radius:8px;padding:10px 6px;text-align:center;}'+
+    '.pr-nutr-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;font-weight:700;margin-bottom:4px;}'+
+    '.pr-nutr-val{font-size:18px;font-weight:900;color:#1a1a1a;}'+
+    '.pr-method{white-space:pre-wrap;line-height:1.75;font-size:13px;color:#374151;margin-bottom:12px;}'+
+    '.pr-footer{margin-top:32px;font-size:11px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:14px;}'+
+    '@media print{'+
+    '#printOverlayBar{display:none!important;}'+
+    '#printOverlay{position:absolute;overflow:visible;}'+
+    '#printContent{padding:0;}'+
+    '@page{margin:12mm;}'+
+    '}'+
+    '</style>'+
+    '<div id="printOverlayBar">'+
+    '  <button class="btn-close" onclick="closePrintOverlay()">✕ Close</button>'+
+    '  <div class="pr-hint">🖨️ Print now &nbsp;·&nbsp; or choose <strong>Save as PDF</strong> in print dialog</div>'+
+    '  <button class="btn-print" onclick="window.print()">🖨️ Print / Save PDF</button>'+
+    '</div>'+
+    '<div id="printContent">'+content+'</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function closePrintOverlay(){
+  var el=document.getElementById('printOverlay');
+  if(el) el.remove();
 }
 function renderMgr(){
   const q=(document.getElementById('mgrSearch')?.value||'').toLowerCase();
