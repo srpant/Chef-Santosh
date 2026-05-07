@@ -312,7 +312,7 @@ body.dark .tag.on{color:#FFFFFF}
 .ing-locked-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:rgba(45,106,63,0.57);color:var(--good);border:1px solid rgba(45,106,63,0.65)}
 
 .ac-wrap{position:relative}
-.ac-drop{position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--bg-card);border:1.5px solid var(--border);border-radius:10px;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;box-shadow:0 8px 24px rgba(0,0,0,.15);margin-top:4px}
+.ac-drop{position:absolute;top:100%;left:0;right:0;z-index:9999;background:var(--bg-card);border:1.5px solid var(--border);border-radius:10px;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain;display:none;box-shadow:0 8px 24px rgba(0,0,0,.15);margin-top:4px}
 .ac-drop.open{display:block}
 .ac-item{padding:10px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--sec-border);color:var(--text)}
 .ac-item:last-child{border-bottom:none}
@@ -1307,27 +1307,52 @@ function init(){
   updateCurrencyBtns();
   updateLastBackupInfo();
   setTimeout(checkAutoBackupReminder, 3000);
-  // Reposition any open dropdowns when on-screen keyboard resizes viewport
-  if(window.visualViewport){
-    window.visualViewport.addEventListener('resize',()=>{
-      document.querySelectorAll('.ac-drop.open').forEach(drop=>{
-        const i=drop.id.replace('ac-','');
-        const inputEl=document.getElementById('ing-name-'+i);
-        if(!inputEl) return;
-        const rect=inputEl.getBoundingClientRect();
-        const visH=window.visualViewport.height;
-        const spaceBelow=visH-rect.bottom-8;
-        const spaceAbove=rect.top-8;
-        if(spaceBelow<120&&spaceAbove>spaceBelow){
-          drop.style.top='auto';drop.style.bottom='calc(100% + 4px)';
-          drop.style.maxHeight=Math.max(Math.min(spaceAbove,280),120)+'px';
-        } else {
-          drop.style.top='100%';drop.style.bottom='auto';
-          drop.style.maxHeight=Math.max(Math.min(spaceBelow,280),120)+'px';
-        }
-      });
+
+  // Reposition dropdowns when keyboard opens/closes
+  function repositionDropdowns(){
+    const visH=window.visualViewport?window.visualViewport.height:window.innerHeight;
+    document.querySelectorAll('.ac-drop.open').forEach(function(drop){
+      const i=drop.id.replace('ac-','');
+      const inputEl=document.getElementById('ing-name-'+i)||document.getElementById('catInput');
+      if(!inputEl) return;
+      const rect=inputEl.getBoundingClientRect();
+      const spaceBelow=visH-rect.bottom-8;
+      const spaceAbove=rect.top-8;
+      // Limit to at most 5 items height (~220px) but cap to available space
+      if(spaceBelow<100&&spaceAbove>spaceBelow){
+        drop.style.top='auto';
+        drop.style.bottom='calc(100% + 4px)';
+        drop.style.maxHeight=Math.max(Math.min(spaceAbove-8,220),80)+'px';
+      } else {
+        drop.style.top='calc(100% + 4px)';
+        drop.style.bottom='auto';
+        drop.style.maxHeight=Math.max(Math.min(spaceBelow-8,220),80)+'px';
+      }
+      drop.style.overflowY='auto';
+      drop.style.webkitOverflowScrolling='touch';
+      drop.style.touchAction='pan-y';
     });
   }
+
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', repositionDropdowns);
+    window.visualViewport.addEventListener('scroll', repositionDropdowns);
+  }
+  window.addEventListener('resize', repositionDropdowns);
+
+  // Stop touch events on dropdown from propagating (prevents keyboard closing)
+  document.addEventListener('touchstart', function(e){
+    if(e.target.closest('.ac-drop')){
+      e.stopPropagation();
+    }
+  }, {passive:true});
+
+  // When any ingredient name input gets focus, reposition after keyboard appears
+  document.addEventListener('focusin', function(e){
+    if(e.target&&(e.target.id||'').startsWith('ing-name-')){
+      setTimeout(repositionDropdowns, 350);
+    }
+  });
 }
 // Safe history wrapper — fails silently in srcdoc/preview iframes
 function _pushState(state,url){try{history.pushState(state,'',url);}catch(e){}}
@@ -1701,7 +1726,14 @@ function onNameInput(i,val){
         // Always allow internal scrolling
         drop.style.overflowY='auto';
         drop.style.webkitOverflowScrolling='touch';
+        drop.style.touchAction='pan-y';
+        drop.style.overscrollBehavior='contain';
       }
+
+      // Prevent touch on dropdown from closing keyboard or scrolling page behind it
+      drop._touchHandler=function(e){e.stopPropagation();};
+      drop.removeEventListener('touchstart',drop._touchHandler);
+      drop.addEventListener('touchstart',drop._touchHandler,{passive:true});
 
       drop.querySelectorAll('.ac-item').forEach(el=>{
         el.addEventListener('mousedown',e=>{
