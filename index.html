@@ -1015,7 +1015,7 @@ body.dark .tag.on{color:#C77DFF}
     </div>
 
     <div style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:12px">
-      Recipe Management & Costing — Mobile v8<br>Chef Santosh Kumar Pant
+      Recipe Management & Costing — Mobile v9<br>Chef Santosh Kumar Pant
     </div>
   </div>
 
@@ -1313,7 +1313,7 @@ function init(){
     const visH=window.visualViewport?window.visualViewport.height:window.innerHeight;
     document.querySelectorAll('.ac-drop.open').forEach(function(drop){
       const i=drop.id.replace('ac-','');
-      const inputEl=document.getElementById('ing-name-'+i)||document.getElementById('catInput');
+      const inputEl=document.getElementById('ing-name-'+i)||document.getElementById('category');
       if(!inputEl) return;
       const rect=inputEl.getBoundingClientRect();
       const spaceBelow=visH-rect.bottom-8;
@@ -2879,12 +2879,15 @@ function pullThroughIngredientCost(ingName,newCost,newUnit){
       const labour=parseFloat(r.labour)||0;
       const overhead=parseFloat(r.overhead)||0;
       const yld=parseInt(r.yield)||1;
-      const tfc=parseFloat(r.tfc)||30;
+      // Use targetFC (user's intended target), NOT tfc (actual achieved %)
+      const targetFC=parseFloat(r.targetFC)||30;
       const total=ingTotal+labour+overhead;
       const perPort=total/yld;
-      const sell=tfc>0?perPort/(tfc/100):0;
-      const actualFC=sell>0?(perPort/sell)*100:tfc;
-      const gp=100-actualFC;
+      // Respect manual sell price override if set
+      const autoSell=targetFC>0?perPort/(targetFC/100):0;
+      const sell=r.sellPriceOverride!=null?r.sellPriceOverride:autoSell;
+      const actualFC=sell>0?(perPort/sell)*100:targetFC;
+      const gp=sell>0?((sell-perPort)/sell)*100:0;
       r.ingTotal=+ingTotal.toFixed(4);
       r.total=+total.toFixed(4);
       r.perPort=+perPort.toFixed(4);
@@ -3388,6 +3391,19 @@ function saveScaledRecipe(){
   copy.ingredients=(copy.ingredients||[]).map(i=>({...i,qty:String(((parseFloat(i.qty)||0)*ratio).toFixed(3).replace(/\.?0+$/,''))}));
   // Scale costs proportionally
   ['ingTotal','labour','overhead','total'].forEach(k=>{if(copy[k]) copy[k]=+(copy[k]*ratio).toFixed(4);});
+  // Recalculate per-portion and sell figures for the new yield
+  const newPerPort=+(copy.total/scaleCurrentYield).toFixed(4);
+  const targetFC=parseFloat(copy.targetFC)||30;
+  const autoSell=targetFC>0?newPerPort/(targetFC/100):0;
+  // Clear sell override on scaled copy — let it auto-calculate
+  copy.sellPriceOverride=null;
+  const sell=autoSell;
+  const actualFC=sell>0?(newPerPort/sell)*100:targetFC;
+  const gp=sell>0?((sell-newPerPort)/sell)*100:0;
+  copy.perPort=newPerPort;
+  copy.sell=+sell.toFixed(4);
+  copy.tfc=+actualFC.toFixed(2);
+  copy.gp=+gp.toFixed(2);
   savedRecipes.push(copy);
   lsSet(RECIPES_KEY,savedRecipes);
   renderList();renderSubList();
